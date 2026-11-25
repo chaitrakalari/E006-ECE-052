@@ -30,6 +30,17 @@ Business rules implemented here (see DESIGN.md for the full register):
          (floor, minimum 3 months) for certificates applied after that
          point. The due date of the second LIMITED certificate itself is
          still computed with the interval in effect *before* the halving.
+  BR-08  Instrument master validation: a row with a bad interval (not a
+         positive whole number), a criticality other than A/B, a missing
+         ID or a duplicate ID is rejected and logged; loading continues.
+  BR-09  UPLOAD_CERT validation: wrong field count, unknown instrument,
+         result not PASS/LIMITED/FAIL, empty cert number or an invalid
+         date is rejected and logged; no state changes.
+  BR-10  ISSUE validation: wrong field count, unknown instrument, required
+         class not A/B or an invalid date is rejected and logged.
+  BR-11  Command-file robustness: unknown commands, STATUS with a bad date
+         or a missing file never crash the run; each is logged to
+         error_log.csv and processing continues with the next line.
 """
 
 from __future__ import annotations
@@ -109,6 +120,14 @@ class IssueRecord:
 
 
 @dataclass
+class ErrorRecord:
+    line_no: int
+    command: str
+    code: str       # machine-readable reason, e.g. UNKNOWN_INSTRUMENT
+    message: str    # human-readable explanation
+
+
+@dataclass
 class CertRecord:
     line_no: int
     cert_no: str
@@ -121,6 +140,17 @@ class CertRecord:
 GRACE_DAYS_B = 15
 GRACE_DAYS_A = 0
 MIN_INTERVAL_MONTHS = 3
+VALID_RESULTS = ("PASS", "LIMITED", "FAIL")
+VALID_CLASSES = ("A", "B")
+
+
+class InputError(Exception):
+    """A bad input line. Carries a code + message for error_log.csv."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
 
 
 class CalibrationTracker:
@@ -132,53 +162,123 @@ class CalibrationTracker:
         self.cert_log: list[CertRecord] = []
         self.state_table_rows: list[dict] = []
         self.due_list_rows: list[dict] = []
+        self.error_log: list[ErrorRecord] = []
+
+    def _error(self, line_no: int, command: str, code: str, message: str) -> None:
+        self.error_log.append(ErrorRecord(line_no, command, code, message))
 
     # -- loading ------------------------------------------------------------
 
     def load_instruments(self, path: str) -> None:
-        with open(path, newline="", encoding="utf-8") as f:
-            for row in csv.DictReader(f):
-                inst = Instrument(
-                    instrument_id=row["instrument_id"].strip(),
-                    instrument_type=row["instrument_type"].strip(),
-                    description=row["description"].strip(),
-                    serial_no=row["serial_no"].strip(),
-                    calibration_interval_months=int(row["calibration_interval_months"]),
-                    criticality=row["criticality"].strip(),
-                    location=row["location"].strip(),
-                )
+        """BR-08: load the master file, rejecting (and logging) bad rows."""
+        try:
+            f = open(path, newline="", encoding="utf-8")
+        except OSError as e:
+            self._error(0, "LOAD_INSTRUMENTS", "FILE_NOT_FOUND", f"cannot open {path}: {e.strerror}")
+            return
+        with f:
+            for row_no, row in enumerate(csv.DictReader(f), start=2):  # row 1 = header
+                try:
+                    inst = self._parse_instrument_row(row)
+                except InputError as e:
+                    self._error(row_no, "LOAD_INSTRUMENTS", e.code, e.message)
+                    continue
+                if inst.instrument_id in self.instruments:
+                    self._error(row_no, "LOAD_INSTRUMENTS", "DUPLICATE_INSTRUMENT",
+                                f"instrument {inst.instrument_id} already registered; row ignored")
+                    continue
                 self.instruments[inst.instrument_id] = inst
                 self.applied_certs[inst.instrument_id] = []
+
+    @staticmethod
+    def _parse_instrument_row(row: dict) -> Instrument:
+        get = lambda k: (row.get(k) or "").strip()  # noqa: E731
+        instrument_id = get("instrument_id")
+        if not instrument_id:
+            raise InputError("MISSING_ID", "instrument_id is empty")
+        try:
+            interval = int(get("calibration_interval_months"))
+        except ValueError:
+            raise InputError("BAD_INTERVAL", f"{instrument_id}: interval '{get('calibration_interval_months')}' is not a whole number")
+        if interval <= 0:
+            raise InputError("BAD_INTERVAL", f"{instrument_id}: interval must be at least 1 month, got {interval}")
+        criticality = get("criticality").upper()
+        if criticality not in VALID_CLASSES:
+            raise InputError("BAD_CRITICALITY", f"{instrument_id}: criticality must be A or B, got '{get('criticality')}'")
+        return Instrument(
+            instrument_id=instrument_id,
+            instrument_type=get("instrument_type"),
+            description=get("description"),
+            serial_no=get("serial_no"),
+            calibration_interval_months=interval,
+            criticality=criticality,
+            location=get("location"),
+        )
 
     # -- commands -------------------------------------------------------------
 
     def run_command_file(self, path: str, data_dir: str = ".") -> None:
-        with open(path, encoding="utf-8") as f:
+        """BR-11: every line is handled independently; a bad line is logged, never fatal."""
+        try:
+            f = open(path, encoding="utf-8")
+        except OSError as e:
+            self._error(0, "RUN", "FILE_NOT_FOUND", f"cannot open command file {path}: {e.strerror}")
+            return
+        with f:
             for line_no, raw in enumerate(f, start=1):
-                line = raw.rstrip("\n")
-                stripped = line.strip()
+                stripped = raw.strip()
                 if not stripped or stripped.startswith("#"):
                     continue
-                parts = stripped.split("|")
-                cmd = parts[0]
-                if cmd == "LOAD_INSTRUMENTS":
-                    self.load_instruments(f"{data_dir}/{parts[1]}")
-                elif cmd == "UPLOAD_CERT":
-                    self._upload_cert(line_no, parts)
-                elif cmd == "ISSUE":
-                    self._issue(line_no, parts)
-                elif cmd == "STATUS":
-                    self._status(parts)
-                elif cmd == "PRINT_ISSUE_LOG":
-                    pass  # issue_log.csv is always produced; nothing extra to do
-                else:
-                    raise ValueError(f"Unknown command at line {line_no}: {cmd}")
+                parts = [p.strip() for p in stripped.split("|")]
+                cmd = parts[0].upper()
+                try:
+                    if cmd == "LOAD_INSTRUMENTS":
+                        if len(parts) != 2:
+                            raise InputError("BAD_FIELD_COUNT", "LOAD_INSTRUMENTS expects 1 argument (file)")
+                        self.load_instruments(f"{data_dir}/{parts[1]}")
+                    elif cmd == "UPLOAD_CERT":
+                        self._upload_cert(line_no, parts)
+                    elif cmd == "ISSUE":
+                        self._issue(line_no, parts)
+                    elif cmd == "STATUS":
+                        self._status(parts)
+                    elif cmd == "PRINT_ISSUE_LOG":
+                        pass  # issue_log.csv is always produced; nothing extra to do
+                    else:
+                        raise InputError("UNKNOWN_COMMAND", f"unknown command '{parts[0]}'")
+                except InputError as e:
+                    self._error(line_no, cmd, e.code, e.message)
+
+    @staticmethod
+    def _need_fields(parts: list[str], n: int, cmd: str) -> None:
+        if len(parts) != n:
+            raise InputError("BAD_FIELD_COUNT", f"{cmd} expects {n - 1} arguments, got {len(parts) - 1}")
+
+    @staticmethod
+    def _safe_date(s: str, what: str) -> date:
+        try:
+            return parse_date(s)
+        except (ValueError, TypeError):
+            raise InputError("BAD_DATE", f"{what} '{s}' is not a valid YYYY-MM-DD date")
+
+    def _require_instrument(self, instrument_id: str) -> None:
+        if instrument_id not in self.instruments:
+            raise InputError("UNKNOWN_INSTRUMENT", f"instrument '{instrument_id}' is not registered")
 
     # -- BR-05 / BR-07: certificate upload ----------------------------------
 
     def _upload_cert(self, line_no: int, parts: list[str]) -> None:
+        # BR-09: validate everything before touching any state
+        self._need_fields(parts, 7, "UPLOAD_CERT")
         _, upload_date_s, cert_no, instrument_id, cal_date_s, result, lab = parts
-        cal_date = parse_date(cal_date_s)
+        self._safe_date(upload_date_s, "upload_date")
+        cal_date = self._safe_date(cal_date_s, "cal_date")
+        if not cert_no:
+            raise InputError("MISSING_CERT_NO", "cert_no is empty")
+        self._require_instrument(instrument_id)
+        result = result.upper()
+        if result not in VALID_RESULTS:
+            raise InputError("BAD_RESULT", f"result must be PASS, LIMITED or FAIL, got '{result}'")
 
         if cert_no in self.seen_cert_numbers:
             self.cert_log.append(CertRecord(line_no, cert_no, instrument_id, cal_date, result, "DUPLICATE"))
@@ -235,8 +335,14 @@ class CalibrationTracker:
     # -- BR-03 / BR-04: ISSUE -------------------------------------------------
 
     def _issue(self, line_no: int, parts: list[str]) -> None:
+        # BR-10: validate everything before logging an outcome
+        self._need_fields(parts, 5, "ISSUE")
         _, date_s, job_id, instrument_id, required_class = parts
-        on_date = parse_date(date_s)
+        on_date = self._safe_date(date_s, "date")
+        self._require_instrument(instrument_id)
+        required_class = required_class.upper()
+        if required_class not in VALID_CLASSES:
+            raise InputError("BAD_CLASS", f"required accuracy class must be A or B, got '{required_class}'")
         state, limited, _due, _latest, _interval = self._compute_state(instrument_id, on_date)
 
         if state in ("OUT_OF_CAL", "FAILED"):
@@ -254,7 +360,8 @@ class CalibrationTracker:
     # -- STATUS: state table row per instrument + due list (BR-06) ----------
 
     def _status(self, parts: list[str]) -> None:
-        status_date = parse_date(parts[1])
+        self._need_fields(parts, 2, "STATUS")
+        status_date = self._safe_date(parts[1], "STATUS date")
         rows_this_status = []
         for instrument_id in sorted(self.instruments.keys()):
             state, limited, due_date, latest, interval_months = self._compute_state(instrument_id, status_date)
@@ -306,6 +413,11 @@ class CalibrationTracker:
             f"{out_dir}/cert_log.csv",
             ["line_no", "cert_no", "instrument_id", "cal_date", "result", "outcome"],
             [vars(r) for r in self.cert_log],
+        )
+        self._write_csv(
+            f"{out_dir}/error_log.csv",
+            ["line_no", "command", "code", "message"],
+            [vars(r) for r in self.error_log],
         )
 
     @staticmethod
