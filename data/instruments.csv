@@ -1,0 +1,31 @@
+instrument_id,instrument_type,description,serial_no,calibration_interval_months,criticality,location
+INS-001,DMM,Digital Multimeter 6.5 digit,SN74708126,24,B,Power Electronics Lab
+INS-002,POWER_SUPPLY,DC Power Supply 30 V 5 A,SN26376341,12,B,QA Lab
+INS-003,POWER_SUPPLY,Triple-Output DC Power Supply,SN71310167,24,A,QA Lab
+INS-004,DMM,Handheld True-RMS Multimeter,SN73002611,24,B,QA Lab
+INS-005,POWER_SUPPLY,DC Power Supply 30 V 5 A,SN83233523,24,B,RF Lab
+INS-006,LCR_METER,Handheld LCR Meter,SN85134554,24,B,Production Test Bay 1
+INS-007,POWER_SUPPLY,DC Power Supply 30 V 5 A,SN99892850,6,A,RF Lab
+INS-008,LCR_METER,Handheld LCR Meter,SN83571250,7,B,QA Lab
+INS-009,LCR_METER,Handheld LCR Meter,SN77363825,12,A,QA Lab
+INS-010,DMM,Digital Multimeter 6.5 digit,SN74275917,24,B,Production Test Bay 1
+INS-011,DMM,Digital Multimeter 6.5 digit,SN68125246,12,B,Power Electronics Lab
+INS-012,LCR_METER,Benchtop LCR Meter 100 kHz,SN49510228,24,A,RF Lab
+INS-013,LCR_METER,Handheld LCR Meter,SN11245123,24,A,EMC Lab
+INS-014,POWER_SUPPLY,Triple-Output DC Power Supply,SN30111687,24,B,QA Lab
+INS-015,POWER_SUPPLY,Triple-Output DC Power Supply,SN90164653,24,B,Production Test Bay 1
+INS-016,DMM,Handheld True-RMS Multimeter,SN80180947,24,B,Production Test Bay 1
+INS-017,LCR_METER,Benchtop LCR Meter 100 kHz,SN58309773,24,B,Power Electronics Lab
+INS-018,LCR_METER,Benchtop LCR Meter 100 kHz,SN44911442,12,B,QA Lab
+INS-019,POWER_SUPPLY,Triple-Output DC Power Supply,SN75171986,24,B,Production Test Bay 1
+INS-020,POWER_SUPPLY,Triple-Output DC Power Supply,SN78621065,24,A,Production Test Bay 1
+INS-021,POWER_SUPPLY,Triple-Output DC Power Supply,SN68281295,24,B,Production Test Bay 2
+INS-022,DMM,Digital Multimeter 6.5 digit,SN99106819,24,B,EMC Lab
+INS-023,POWER_SUPPLY,DC Power Supply 30 V 5 A,SN48932423,24,B,RF Lab
+INS-024,LCR_METER,Benchtop LCR Meter 100 kHz,SN71425491,24,B,EMC Lab
+INS-025,DMM,Handheld True-RMS Multimeter,SN68847902,12,A,QA Lab
+INS-026,POWER_SUPPLY,Triple-Output DC Power Supply,SN79145394,24,B,RF Lab
+INS-027,POWER_SUPPLY,DC Power Supply 30 V 5 A,SN70789987,12,B,Power Electronics Lab
+INS-028,DMM,Digital Multimeter 6.5 digit,SN67146759,6,B,QA Lab
+INS-029,LCR_METER,Benchtop LCR Meter 100 kHz,SN74309920,24,B,EMC Lab
+INS-030,LCR_METER,Handheld LCR Meter,SN97046671,6,B,RF Lab
