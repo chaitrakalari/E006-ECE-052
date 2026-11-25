@@ -7,9 +7,17 @@ changes.
 """
 import sys
 import traceback
-import test_engine as mod
+import test_engine, test_validation
 
-tests = [name for name in dir(mod) if name.startswith("test_")]
+class _Mod:  # merge every test module into one namespace
+    pass
+
+mod = _Mod()
+for _m in (test_engine, test_validation):
+    for _n in dir(_m):
+        if _n.startswith("test_"):
+            setattr(mod, _n, getattr(_m, _n))
+tests = sorted(n for n in dir(mod) if n.startswith("test_"))
 passed, failed = 0, []
 for name in tests:
     fn = getattr(mod, name)
