@@ -12,3 +12,8 @@
 10. Line numbers in cert_log.csv / issue_log.csv are the physical line number in commands.txt, including comment/blank lines, so they line up with the planted-scenario references in the sample pack's README.
 11. Wrote one pytest per business rule (not just end-to-end tests) so a failing rule points straight at its ID instead of a vague diff — this is also our viva script.
 12. Did not implement either stretch goal (reminder list at 30/15/0 days; annual calibration budget) given the time left before the deadline — core rules, edge cases and tests came first.
+13. Rejected input lines go to a separate `error_log.csv` instead of the four graded files, so valid data produces byte-identical graded outputs and the hidden-set comparison cannot be disturbed by our error handling.
+14. A rejected ISSUE (unknown instrument, bad class/date) writes no issue-log row — a request that cannot be identified is not a real issue event; it is reported in `error_log.csv` with its line number.
+15. Validation runs before any state change, and a rejected UPLOAD_CERT does not add its cert number to the seen set, so a corrected re-upload with the same number is not wrongly flagged DUPLICATE.
+16. Result, criticality and class values are upper-cased and trimmed before checking (so `pass` or ` A ` is accepted) but anything outside PASS/LIMITED/FAIL or A/B is rejected, never guessed.
+17. A bad line never aborts the run (BR-11): one typo in a large command file should not hide the correct results for the other hundred lines.

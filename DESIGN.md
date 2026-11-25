@@ -53,6 +53,7 @@ classDiagram
         +set~str~ seen_cert_numbers
         +list~IssueRecord~ issue_log
         +list~CertRecord~ cert_log
+        +list~ErrorRecord~ error_log
         +load_instruments(path)
         +run_command_file(path)
         +_upload_cert(line, parts)
@@ -81,6 +82,14 @@ classDiagram
         +string outcome    %% APPLIED | STORED_OLDER | DUPLICATE
     }
 
+    class ErrorRecord {
+        +int line_no
+        +string command
+        +string code       %% e.g. UNKNOWN_INSTRUMENT, BAD_RESULT, BAD_DATE
+        +string message
+    }
+
+    CalibrationTracker "1" o-- "many" ErrorRecord
     CalibrationTracker "1" o-- "many" Instrument
     Instrument "1" o-- "many" AppliedCert : applied_certs
     CalibrationTracker "1" o-- "many" IssueRecord
@@ -133,6 +142,10 @@ State is **derived at query time** from the latest applied certificate's `cal_da
 | BR-05 | Certificate ordering: the latest cal date wins. A certificate dated on/before the current latest applied cal date is stored (outcome STORED_OLDER) but does not change state. A certificate number seen before (on any instrument) is rejected (outcome DUPLICATE) and not stored at all. |
 | BR-06 | Due list for a STATUS date: every instrument whose state is not FAILED and whose due date is on/before (STATUS date + 30 days), sorted by due date then instrument ID. `days_remaining` = due_date − STATUS date, and can be negative for instruments already overdue. |
 | BR-07 | If the last two *applied* certificates for an instrument are both LIMITED, the interval is halved (floor division, minimum 3 months) for certificates applied after that point. The due date of the second LIMITED certificate itself is still computed using the interval that was in effect *before* this halving. |
+| BR-08 | Instrument master validation: a row with an interval that is not a positive whole number, a criticality other than A/B, an empty ID, or a duplicate ID is rejected and logged to `error_log.csv`; the first valid row for an ID is kept and loading continues. |
+| BR-09 | UPLOAD_CERT validation: wrong field count, invalid date, empty cert number, unknown instrument, or a result other than PASS/LIMITED/FAIL is rejected and logged. A rejected line changes no state and does not "use up" its cert number. |
+| BR-10 | ISSUE validation: wrong field count, invalid date, unknown instrument, or a required accuracy class other than A/B is rejected and logged. No issue-log line is written for a rejected request. |
+| BR-11 | Command-file robustness: an unknown command, a STATUS with a bad date, or a missing file never crashes the run. Each is logged (with its physical line number) and processing continues with the next line. |
 
 Two implementation decisions not fully spelled out in the brief are recorded in `decision_log.md` (same-day command ordering, and the "no certificate yet" state) — see that file for the reasoning.
 
@@ -143,9 +156,10 @@ Two implementation decisions not fully spelled out in the brief are recorded in 
 ```
 main.py            CLI entry point: wires engine to data/ and output/
 src/engine.py       CalibrationTracker — all business logic, pure functions + one stateful class
-tests/test_engine.py  Unit tests, one per BR plus a full-pack smoke test
+tests/test_engine.py      Unit tests for BR-01..BR-07 plus a full-pack smoke test
+tests/test_validation.py  Tests for BR-08..BR-11 (input validation)
 data/                instruments.csv, commands.txt (the sample pack)
-output/              state_table.csv, due_list.csv, issue_log.csv, cert_log.csv (generated)
+output/              state_table.csv, due_list.csv, issue_log.csv, cert_log.csv, error_log.csv (generated)
 ```
 
-No database, no UI, no external dependencies beyond the Python standard library (`csv`, `dataclasses`, `datetime`) — matches the "command-file driven, no UI" requirement. Everything is evaluated by running `main.py` against a (possibly hidden) data pack and diffing the four output CSVs field-for-field, so the engine's I/O contract (column names and order) is the single most important thing to keep exact — see `README.md`'s "Output format" section, which mirrors the sample-data-pack README.
+No database, no UI, no external dependencies beyond the Python standard library (`csv`, `dataclasses`, `datetime`) — matches the "command-file driven, no UI" requirement. Everything is evaluated by running `main.py` against a (possibly hidden) data pack and diffing the four graded output CSVs (`error_log.csv` is an extra file and is not part of the graded set) field-for-field, so the engine's I/O contract (column names and order) is the single most important thing to keep exact — see `README.md`'s "Output format" section, which mirrors the sample-data-pack README.
